@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f0f13" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DAN v1" />
+  <meta name="description" content="DAN v1 — Personal Dashboard" />
+  <title>DAN v1</title>
+
+  <!-- React + Babel (no Node needed) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body {
+      font-family: 'Sora', sans-serif;
+      background: #0f0f13;
+      color: #e8e6f0;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #1a1a22; }
+    ::-webkit-scrollbar-thumb { background: #3a3a50; border-radius: 2px; }
+    input, textarea, select, button { font-family: 'Sora', sans-serif; }
+
+    .tab-btn { background: none; border: none; cursor: pointer; transition: all 0.2s; }
+    .todo-item { animation: slideIn 0.18s ease; }
+    @keyframes slideIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+    .day-cell:hover { background: #1e1e2a !important; cursor: pointer; }
+    .note-card:hover { background: #1a1a24 !important; cursor: pointer; }
+    .folder-row:hover { background: #1a1a24 !important; cursor: pointer; }
+    .profile-opt:hover { background: #1a1a24 !important; }
+
+    .input-field {
+      background: #1a1a22;
+      border: 1px solid #2a2a38;
+      color: #e8e6f0;
+      border-radius: 8px;
+      padding: 9px 13px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      width: 100%;
+    }
+    .input-field:focus { border-color: var(--accent, #22c55e); }
+
+    .btn-primary {
+      border: none;
+      color: white;
+      padding: 8px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: filter 0.2s;
+    }
+    .btn-primary:hover { filter: brightness(1.15); }
+
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    .modal {
+      background: #17171f;
+      border: 1px solid #2a2a38;
+      border-radius: 16px;
+      padding: 24px;
+      width: 90%;
+      max-width: 460px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .profile-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      background: #14141c;
+      border: 1px solid #2a2a38;
+      border-radius: 12px;
+      overflow: hidden;
+      z-index: 50;
+      min-width: 200px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    // ── SVG Icon helper (uses Lucide UMD) ─────────────────────────────────────
+    function Icon({ name, size = 16, color = "currentColor", style = {} }) {
+      const ref = useRef();
+      useEffect(() => {
+        if (ref.current && window.lucide) {
+          ref.current.innerHTML = "";
+          const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          el.setAttribute("width", size);
+          el.setAttribute("height", size);
+          el.setAttribute("viewBox", "0 0 24 24");
+          el.setAttribute("fill", "none");
+          el.setAttribute("stroke", color);
+          el.setAttribute("stroke-width", "2");
+          el.setAttribute("stroke-linecap", "round");
+          el.setAttribute("stroke-linejoin", "round");
+          const iconData = window.lucide[name];
+          if (iconData) {
+            iconData[2].forEach(([tag, attrs]) => {
+              const child = document.createElementNS("http://www.w3.org/2000/svg", tag);
+              Object.entries(attrs).forEach(([k, v]) => child.setAttribute(k, v));
+              el.appendChild(child);
+            });
+          }
+          ref.current.appendChild(el);
+        }
+      }, [name, size, color]);
+      return <span ref={ref} style={{ display:"inline-flex", alignItems:"center", flexShrink:0, ...style }} />;
+    }
+
+    // ── Constants ─────────────────────────────────────────────────────────────
+    const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+    const PROFILES = [
+      { id:"personal",     label:"Personal",     icon:"User",      accent:"#22c55e", accentDim:"#22c55e15", accentBorder:"#22c55e40", bg:"#090f0b" },
+      { id:"ventures",     label:"Ventures",     icon:"Rocket",    accent:"#eab308", accentDim:"#eab30815", accentBorder:"#eab30840", bg:"#0f0e06" },
+      { id:"professional", label:"Professional", icon:"Star",      accent:"#3b82f6", accentDim:"#3b82f615", accentBorder:"#3b82f640", bg:"#07090f" },
+      { id:"work",         label:"Work",         icon:"Briefcase", accent:"#ef4444", accentDim:"#ef444415", accentBorder:"#ef444440", bg:"#0f0707" },
+    ];
+
+    // ── Storage hook ──────────────────────────────────────────────────────────
+    function useProfileStorage(profileId, key, initial) {
+      const storageKey = `db_${profileId}_${key}`;
+      const [value, setValue] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(storageKey)) ?? initial; }
+        catch { return initial; }
+      });
+      useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(value)); }, [storageKey, value]);
+      useEffect(() => {
+        try { setValue(JSON.parse(localStorage.getItem(storageKey)) ?? initial); }
+        catch { setValue(initial); }
+      }, [storageKey]);
+      return [value, setValue];
+    }
+
+    // ── Event Modal ───────────────────────────────────────────────────────────
+    function EventModal({ day, month, year, events, onAdd, onDelete, onClose, accent }) {
+      const [text, setText] = useState("");
+      const [address, setAddress] = useState("");
+      const [url, setUrl] = useState("");
+      const [showExtra, setShowExtra] = useState(false);
+
+      const submit = () => {
+        if (!text.trim()) return;
+        onAdd({ text: text.trim(), address: address.trim(), url: url.trim() });
+        setText(""); setAddress(""); setUrl(""); setShowExtra(false);
+      };
+
+      return (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ fontSize:15, fontWeight:600 }}>{MONTHS[month]} {day}, {year}</h3>
+              <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:"#6b6b8a" }}>
+                <Icon name="X" size={16} color="#6b6b8a" />
+              </button>
+            </div>
+
+            {events.length > 0 && (
+              <div style={{ marginBottom:14, display:"flex", flexDirection:"column", gap:6 }}>
+                {events.map(ev => (
+                  <div key={ev.id} style={{ background:"#0f0f13", borderRadius:8, padding:"10px 12px" }}>
+                    <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8 }}>
+                      <span style={{ fontSize:13, fontWeight:500, flex:1 }}>{ev.text}</span>
+                      <button onClick={() => onDelete(ev.id)}
+                        style={{ background:"none", border:"none", cursor:"pointer", color:"#3a3a50", flexShrink:0 }}
+                        onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                        onMouseOut={e=>e.currentTarget.style.color="#3a3a50"}>
+                        <Icon name="X" size={12} color="inherit" />
+                      </button>
+                    </div>
+                    {ev.address && (
+                      <a href={`https://maps.google.com/?q=${encodeURIComponent(ev.address)}`}
+                        target="_blank" rel="noreferrer"
+                        style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#6b6b8a", textDecoration:"none", marginTop:5 }}
+                        onMouseOver={e=>e.currentTarget.style.color=accent}
+                        onMouseOut={e=>e.currentTarget.style.color="#6b6b8a"}>
+                        <Icon name="MapPin" size={11} color="currentColor" /> {ev.address}
+                      </a>
+                    )}
+                    {ev.url && (
+                      <a href={ev.url.startsWith("http") ? ev.url : "https://"+ev.url}
+                        target="_blank" rel="noreferrer"
+                        style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#6b6b8a", textDecoration:"none", marginTop:4 }}
+                        onMouseOver={e=>e.currentTarget.style.color=accent}
+                        onMouseOut={e=>e.currentTarget.style.color="#6b6b8a"}>
+                        <Icon name="ExternalLink" size={11} color="currentColor" />
+                        {ev.url.length > 45 ? ev.url.slice(0,45)+"…" : ev.url}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+              <div style={{ display:"flex", gap:8 }}>
+                <input className="input-field" placeholder="Event name…" value={text}
+                  onChange={e=>setText(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}
+                  style={{ flex:1, "--accent":accent }} autoFocus />
+                <button onClick={() => setShowExtra(v=>!v)}
+                  style={{ background:showExtra?"#2a2a38":"#1a1a22", border:"1px solid #2a2a38",
+                    color:showExtra?accent:"#6b6b8a", borderRadius:8, padding:"0 10px", cursor:"pointer",
+                    fontSize:12, transition:"all 0.15s", whiteSpace:"nowrap" }}>
+                  + Details
+                </button>
+              </div>
+              {showExtra && (
+                <>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <Icon name="MapPin" size={13} color="#6b6b8a" />
+                    <input className="input-field" placeholder="Address (opens in Maps)…" value={address}
+                      onChange={e=>setAddress(e.target.value)} style={{ "--accent":accent }} />
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <Icon name="Link" size={13} color="#6b6b8a" />
+                    <input className="input-field" placeholder="URL (e.g. zoom link, website)…" value={url}
+                      onChange={e=>setUrl(e.target.value)} style={{ "--accent":accent }} />
+                  </div>
+                </>
+              )}
+              <button onClick={submit} className="btn-primary"
+                style={{ background:accent, width:"100%", marginTop:2 }}>
+                Add Event
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Note Editor ───────────────────────────────────────────────────────────
+    function NoteEditor({ note, folders, onSave, onCancel, accent }) {
+      const [title, setTitle] = useState(note.title);
+      const [body, setBody] = useState(note.body);
+      const [folder, setFolder] = useState(note.folder || "");
+      const [links, setLinks] = useState(note.links || []);
+      const [files, setFiles] = useState(note.files || []);
+      const [newLink, setNewLink] = useState("");
+      const [newLinkLabel, setNewLinkLabel] = useState("");
+      const [showAttach, setShowAttach] = useState(false);
+      const fileInputRef = useRef();
+
+      const addLink = () => {
+        if (!newLink.trim()) return;
+        setLinks(prev => [...prev, { id:Date.now(), label:newLinkLabel.trim()||newLink.trim(), url:newLink.trim() }]);
+        setNewLink(""); setNewLinkLabel("");
+      };
+
+      const handleFileChange = (e) => {
+        Array.from(e.target.files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = ev => {
+            setFiles(prev => [...prev, { id:Date.now()+Math.random(), name:file.name, size:file.size, type:file.type, data:ev.target.result }]);
+          };
+          reader.readAsDataURL(file);
+        });
+        e.target.value = "";
+      };
+
+      const fmtSize = b => b < 1024 ? b+"B" : b < 1048576 ? (b/1024).toFixed(1)+"KB" : (b/1048576).toFixed(1)+"MB";
+
+      const save = () => onSave({ ...note, title:title||"Untitled", body, folder, links, files, updated:new Date().toISOString() });
+
+      return (
+        <div>
+          <div style={{ display:"flex", gap:8, marginBottom:14, alignItems:"center", flexWrap:"wrap" }}>
+            <button onClick={save} className="btn-primary"
+              style={{ background:accent, display:"flex", alignItems:"center", gap:6 }}>
+              <Icon name="Save" size={13} color="white" /> Save
+            </button>
+            <button onClick={onCancel}
+              style={{ background:"none", border:"1px solid #2a2a38", color:"#6b6b8a", padding:"7px 14px",
+                borderRadius:8, cursor:"pointer", fontSize:13 }}>
+              Cancel
+            </button>
+            <select value={folder} onChange={e=>setFolder(e.target.value)}
+              style={{ background:"#1a1a22", border:"1px solid #2a2a38", color:folder?"#e8e6f0":"#6b6b8a",
+                borderRadius:8, padding:"7px 10px", fontSize:13, cursor:"pointer", outline:"none", marginLeft:"auto" }}>
+              <option value="">No folder</option>
+              {folders.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
+            <button onClick={() => setShowAttach(v=>!v)}
+              style={{ background:showAttach?"#2a2a38":"#1a1a22", border:"1px solid #2a2a38",
+                color:showAttach?accent:"#6b6b8a", borderRadius:8, padding:"7px 10px",
+                cursor:"pointer", fontSize:12, display:"flex", alignItems:"center", gap:5 }}>
+              <Icon name="Paperclip" size={12} color="currentColor" /> Attach
+            </button>
+          </div>
+
+          <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="Note title…"
+            style={{ width:"100%", background:"transparent", border:"none", borderBottom:"1px solid #2a2a38",
+              color:"#e8e6f0", fontSize:18, fontWeight:600, padding:"0 0 10px", outline:"none",
+              fontFamily:"inherit", marginBottom:12 }} />
+
+          <textarea value={body} onChange={e=>setBody(e.target.value)} placeholder="Write something…" rows={10}
+            style={{ width:"100%", background:"transparent", border:"none", color:"#e8e6f0",
+              fontSize:14, lineHeight:1.75, outline:"none", fontFamily:"inherit", resize:"vertical", padding:0 }} />
+
+          {showAttach && (
+            <div style={{ marginTop:16, padding:14, background:"#13131a", borderRadius:10, border:"1px solid #1c1c28" }}>
+              <p style={{ fontSize:11, color:"#6b6b8a", marginBottom:10, fontFamily:"'DM Mono',monospace",
+                textTransform:"uppercase", letterSpacing:1 }}>Attachments</p>
+
+              <div style={{ marginBottom:10 }}>
+                <div style={{ display:"flex", gap:6, marginBottom:6 }}>
+                  <input className="input-field" placeholder="URL…" value={newLink}
+                    onChange={e=>setNewLink(e.target.value)} style={{ flex:2, "--accent":accent }}
+                    onKeyDown={e=>e.key==="Enter"&&addLink()} />
+                  <input className="input-field" placeholder="Label (optional)…" value={newLinkLabel}
+                    onChange={e=>setNewLinkLabel(e.target.value)} style={{ flex:1, "--accent":accent }}
+                    onKeyDown={e=>e.key==="Enter"&&addLink()} />
+                  <button onClick={addLink}
+                    style={{ background:accent, border:"none", color:"white", borderRadius:8, padding:"0 12px", cursor:"pointer" }}>
+                    <Icon name="Plus" size={14} color="white" />
+                  </button>
+                </div>
+                {links.map(l => (
+                  <div key={l.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                    <Icon name="Link" size={12} color="#6b6b8a" />
+                    <a href={l.url.startsWith("http")?l.url:"https://"+l.url} target="_blank" rel="noreferrer"
+                      style={{ fontSize:13, color:accent, textDecoration:"none", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                      {l.label}
+                    </a>
+                    <button onClick={()=>setLinks(p=>p.filter(x=>x.id!==l.id))}
+                      style={{ background:"none", border:"none", cursor:"pointer", color:"#3a3a50" }}
+                      onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                      onMouseOut={e=>e.currentTarget.style.color="#3a3a50"}>
+                      <Icon name="X" size={12} color="currentColor" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <input ref={fileInputRef} type="file" multiple onChange={handleFileChange} style={{ display:"none" }} />
+              <button onClick={()=>fileInputRef.current.click()}
+                style={{ background:"#1a1a22", border:"1px solid #2a2a38", color:"#9090b0",
+                  borderRadius:8, padding:"7px 12px", cursor:"pointer", fontSize:12,
+                  display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                <Icon name="Paperclip" size={12} color="currentColor" /> Attach File
+              </button>
+              {files.map(f => (
+                <div key={f.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                  <Icon name="FileText" size={12} color="#6b6b8a" />
+                  <a href={f.data} download={f.name}
+                    style={{ fontSize:13, color:"#c0c0d8", textDecoration:"none", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {f.name}
+                  </a>
+                  <span style={{ fontSize:11, color:"#3a3a50", fontFamily:"'DM Mono',monospace" }}>{fmtSize(f.size)}</span>
+                  <button onClick={()=>setFiles(p=>p.filter(x=>x.id!==f.id))}
+                    style={{ background:"none", border:"none", cursor:"pointer", color:"#3a3a50" }}
+                    onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                    onMouseOut={e=>e.currentTarget.style.color="#3a3a50"}>
+                    <Icon name="X" size={12} color="currentColor" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Main App ──────────────────────────────────────────────────────────────
+    function App() {
+      const [profileId, setProfileId] = useState(() => localStorage.getItem("db_activeProfile") ?? "personal");
+      const [showProfileMenu, setShowProfileMenu] = useState(false);
+      const [tab, setTab] = useState("todos");
+
+      const profile = PROFILES.find(p => p.id === profileId);
+      const today = new Date();
+
+      const [todos, setTodos] = useProfileStorage(profileId, "todos", []);
+      const [notes, setNotes] = useProfileStorage(profileId, "notes", []);
+      const [calEvents, setCalEvents] = useProfileStorage(profileId, "calevents", []);
+      const [folders, setFolders] = useProfileStorage(profileId, "folders", []);
+
+      useEffect(() => { localStorage.setItem("db_activeProfile", profileId); }, [profileId]);
+      useEffect(() => { document.body.style.background = profile.bg; }, [profile.bg]);
+
+      const switchProfile = (id) => {
+        setProfileId(id); setShowProfileMenu(false); setTab("todos");
+        setEditingNote(null); setNewTodo(""); setSelectedFolder(null);
+      };
+
+      // Todos
+      const [newTodo, setNewTodo] = useState("");
+      const [todoPriority, setTodoPriority] = useState("medium");
+      const todoInputRef = useRef();
+      const addTodo = () => {
+        const text = newTodo.trim(); if (!text) return;
+        setTodos(prev => [{ id:Date.now(), text, done:false, priority:todoPriority, created:new Date().toISOString() }, ...prev]);
+        setNewTodo(""); todoInputRef.current?.focus();
+      };
+      const toggleTodo = id => setTodos(prev => prev.map(t => t.id===id ? {...t, done:!t.done} : t));
+      const deleteTodo = id => setTodos(prev => prev.filter(t => t.id!==id));
+
+      // Notes
+      const [editingNote, setEditingNote] = useState(null);
+      const [selectedFolder, setSelectedFolder] = useState(null);
+      const [showNewFolder, setShowNewFolder] = useState(false);
+      const [newFolderName, setNewFolderName] = useState("");
+
+      const newNote = () => {
+        const note = { id:Date.now(), title:"Untitled", body:"", folder:selectedFolder||"", links:[], files:[], updated:new Date().toISOString() };
+        setNotes(prev => [note, ...prev]); setEditingNote(note);
+      };
+      const saveNote = updated => { setNotes(prev => prev.map(n => n.id===updated.id ? updated : n)); setEditingNote(null); };
+      const deleteNote = id => { setNotes(prev => prev.filter(n => n.id!==id)); if (editingNote?.id===id) setEditingNote(null); };
+      const addFolder = () => {
+        const name = newFolderName.trim(); if (!name || folders.includes(name)) return;
+        setFolders(prev => [...prev, name]); setNewFolderName(""); setShowNewFolder(false);
+      };
+      const deleteFolder = name => {
+        setFolders(prev => prev.filter(f => f!==name));
+        setNotes(prev => prev.map(n => n.folder===name ? {...n, folder:""} : n));
+        if (selectedFolder===name) setSelectedFolder(null);
+      };
+      const visibleNotes = selectedFolder === null ? notes : notes.filter(n => (n.folder||"") === selectedFolder);
+
+      // Calendar
+      const [calMonth, setCalMonth] = useState(today.getMonth());
+      const [calYear, setCalYear] = useState(today.getFullYear());
+      const [selectedDay, setSelectedDay] = useState(null);
+      const [showEventModal, setShowEventModal] = useState(false);
+
+      const prevMonth = () => { if(calMonth===0){setCalMonth(11);setCalYear(y=>y-1);}else setCalMonth(m=>m-1); };
+      const nextMonth = () => { if(calMonth===11){setCalMonth(0);setCalYear(y=>y+1);}else setCalMonth(m=>m+1); };
+      const eventsForDay = day => calEvents.filter(e => e.day===day && e.month===calMonth && e.year===calYear);
+      const isToday = day => day===today.getDate() && calMonth===today.getMonth() && calYear===today.getFullYear();
+      const addCalEvent = ({ text, address, url }) => {
+        setCalEvents(prev => [...prev, { id:Date.now(), day:selectedDay, month:calMonth, year:calYear, text, address, url }]);
+      };
+      const deleteCalEvent = id => setCalEvents(prev => prev.filter(e => e.id!==id));
+
+      const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+      const firstDay = new Date(calYear, calMonth, 1).getDay();
+      const calGrid = [];
+      for (let i=0; i<firstDay; i++) calGrid.push(null);
+      for (let d=1; d<=daysInMonth; d++) calGrid.push(d);
+
+      const todayMs = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+      const allSorted = [...calEvents].sort((a,b) => new Date(a.year,a.month,a.day) - new Date(b.year,b.month,b.day));
+      const upcomingEvents = allSorted.filter(e => new Date(e.year,e.month,e.day).getTime() >= todayMs);
+      const pastEvents = allSorted.filter(e => new Date(e.year,e.month,e.day).getTime() < todayMs);
+
+      const priorityColor = { high:"#ef4444", medium:"#f59e0b", low:"#6ee7b7" };
+      const priorityLabel = { high:"High", medium:"Med", low:"Low" };
+
+      const EventListItem = ({ ev }) => (
+        <div style={{ padding:"10px 14px", background:"#13131a", borderRadius:8, border:"1px solid #1c1c28" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span style={{ fontFamily:"'DM Mono',monospace", fontSize:12, color:profile.accent, minWidth:90, flexShrink:0 }}>
+              {MONTHS[ev.month].slice(0,3)} {ev.day}, {ev.year}
+            </span>
+            <span style={{ fontSize:14, flex:1 }}>{ev.text}</span>
+            <button onClick={()=>deleteCalEvent(ev.id)}
+              style={{ background:"none", border:"none", cursor:"pointer", color:"#2e2e40" }}
+              onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+              onMouseOut={e=>e.currentTarget.style.color="#2e2e40"}>
+              <Icon name="X" size={13} color="currentColor" />
+            </button>
+          </div>
+          {ev.address && (
+            <a href={`https://maps.google.com/?q=${encodeURIComponent(ev.address)}`} target="_blank" rel="noreferrer"
+              style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#6b6b8a", textDecoration:"none", marginTop:5, marginLeft:100 }}
+              onMouseOver={e=>e.currentTarget.style.color=profile.accent}
+              onMouseOut={e=>e.currentTarget.style.color="#6b6b8a"}>
+              <Icon name="MapPin" size={10} color="currentColor" /> {ev.address}
+            </a>
+          )}
+          {ev.url && (
+            <a href={ev.url.startsWith("http")?ev.url:"https://"+ev.url} target="_blank" rel="noreferrer"
+              style={{ display:"flex", alignItems:"center", gap:5, fontSize:11, color:"#6b6b8a", textDecoration:"none", marginTop:4, marginLeft:100 }}
+              onMouseOver={e=>e.currentTarget.style.color=profile.accent}
+              onMouseOut={e=>e.currentTarget.style.color="#6b6b8a"}>
+              <Icon name="ExternalLink" size={10} color="currentColor" />
+              {ev.url.length>50?ev.url.slice(0,50)+"…":ev.url}
+            </a>
+          )}
+        </div>
+      );
+
+      return (
+        <div style={{ fontFamily:"'Sora',sans-serif", minHeight:"100vh", background:profile.bg, color:"#e8e6f0", transition:"background 0.35s ease" }}>
+
+          {/* Header */}
+          <div style={{ padding:"22px 20px 0", maxWidth:720, margin:"0 auto" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+
+              {/* Profile switcher */}
+              <div style={{ position:"relative" }}>
+                <button onClick={()=>setShowProfileMenu(v=>!v)}
+                  style={{ display:"flex", alignItems:"center", gap:8, background:"#13131a",
+                    border:`1px solid ${profile.accentBorder}`, borderRadius:10, padding:"8px 14px",
+                    cursor:"pointer", color:"#e8e6f0", transition:"border-color 0.3s" }}>
+                  <Icon name={profile.icon} size={14} color={profile.accent} />
+                  <span style={{ fontSize:14, fontWeight:600, color:profile.accent }}>{profile.label}</span>
+                  <Icon name="ChevronDown" size={12} color="#6b6b8a"
+                    style={{ transform:showProfileMenu?"rotate(180deg)":"rotate(0deg)", transition:"transform 0.2s" }} />
+                </button>
+
+                {showProfileMenu && (
+                  <div className="profile-menu">
+                    {PROFILES.map(p => {
+                      const active = p.id === profileId;
+                      return (
+                        <button key={p.id} className="profile-opt" onClick={()=>switchProfile(p.id)}
+                          style={{ display:"flex", alignItems:"center", gap:10, width:"100%", padding:"12px 16px",
+                            background:active?"#1c1c28":"transparent", border:"none", cursor:"pointer",
+                            color:active?p.accent:"#9090b0", fontSize:14, fontWeight:active?600:400,
+                            borderLeft:`3px solid ${active?p.accent:"transparent"}`, textAlign:"left" }}>
+                          <Icon name={p.icon} size={14} color={active?p.accent:"#5a5a78"} />
+                          {p.label}
+                          {active && <span style={{ marginLeft:"auto", fontSize:10, color:p.accent, fontFamily:"'DM Mono',monospace", opacity:0.7 }}>active</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <span style={{ fontSize:12, color:"#5a5a78", fontFamily:"'DM Mono',monospace" }}>
+                {today.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
+              </span>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display:"flex", gap:2, borderBottom:"1px solid #1c1c28" }}>
+              {[
+                { id:"todos", label:"To-Do", icon:"CheckSquare" },
+                { id:"notes", label:"Notes", icon:"FileText" },
+                { id:"calendar", label:"Calendar", icon:"Calendar" },
+              ].map(({id,label,icon}) => (
+                <button key={id} className="tab-btn" onClick={()=>setTab(id)}
+                  style={{ padding:"10px 16px", fontSize:13, fontWeight:500,
+                    color:tab===id?profile.accent:"#6b6b8a",
+                    borderBottom:`2px solid ${tab===id?profile.accent:"transparent"}`,
+                    marginBottom:-1, display:"flex", alignItems:"center", gap:6 }}>
+                  <Icon name={icon} size={14} color={tab===id?profile.accent:"#6b6b8a"} />
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {showProfileMenu && <div style={{ position:"fixed", inset:0, zIndex:40 }} onClick={()=>setShowProfileMenu(false)} />}
+
+          <div style={{ maxWidth:720, margin:"0 auto", padding:"20px 20px 80px" }}>
+
+            {/* ── TO-DO ── */}
+            {tab==="todos" && (
+              <div>
+                <div style={{ display:"flex", gap:8, marginBottom:20 }}>
+                  <input ref={todoInputRef} className="input-field" placeholder="Add a task…" value={newTodo}
+                    onChange={e=>setNewTodo(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTodo()}
+                    style={{ flex:1, "--accent":profile.accent }} />
+                  <select value={todoPriority} onChange={e=>setTodoPriority(e.target.value)}
+                    style={{ background:"#1a1a22", border:"1px solid #2a2a38", color:"#e8e6f0",
+                      borderRadius:8, padding:"0 10px", fontSize:13, cursor:"pointer", outline:"none" }}>
+                    <option value="high">High</option>
+                    <option value="medium">Med</option>
+                    <option value="low">Low</option>
+                  </select>
+                  <button onClick={addTodo}
+                    style={{ background:profile.accent, border:"none", color:"white", borderRadius:8, padding:"0 14px", cursor:"pointer" }}>
+                    <Icon name="Plus" size={16} color="white" />
+                  </button>
+                </div>
+
+                {todos.length > 0 && (
+                  <div style={{ display:"flex", gap:16, marginBottom:16, fontSize:12, color:"#5a5a78", fontFamily:"'DM Mono',monospace" }}>
+                    <span>{todos.filter(t=>!t.done).length} remaining</span>
+                    <span>·</span>
+                    <span>{todos.filter(t=>t.done).length} done</span>
+                  </div>
+                )}
+
+                {todos.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"60px 0", color:"#2e2e40" }}>
+                    <Icon name="CheckSquare" size={28} color="#2e2e40" style={{ marginBottom:10, opacity:0.4 }} />
+                    <p style={{ fontSize:14, marginTop:10 }}>No tasks yet for {profile.label}.</p>
+                  </div>
+                )}
+
+                <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                  {todos.map(todo => (
+                    <div key={todo.id} className="todo-item"
+                      style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px",
+                        background:"#13131a", borderRadius:10, border:"1px solid #1c1c28",
+                        opacity:todo.done?0.45:1, transition:"opacity 0.2s" }}>
+                      <button onClick={()=>toggleTodo(todo.id)}
+                        style={{ width:22, height:22, borderRadius:6, flexShrink:0, cursor:"pointer",
+                          background:todo.done?profile.accent:"transparent",
+                          border:todo.done?"none":"2px solid #3a3a50",
+                          display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.2s" }}>
+                        {todo.done && <Icon name="Check" size={12} color="white" />}
+                      </button>
+                      <span style={{ flex:1, fontSize:14, textDecoration:todo.done?"line-through":"none",
+                        color:todo.done?"#3a3a50":"#e8e6f0" }}>{todo.text}</span>
+                      <span style={{ fontSize:11, padding:"2px 7px", borderRadius:4, fontFamily:"'DM Mono',monospace",
+                        background:priorityColor[todo.priority]+"20", color:priorityColor[todo.priority] }}>
+                        {priorityLabel[todo.priority]}
+                      </span>
+                      <button onClick={()=>deleteTodo(todo.id)}
+                        style={{ background:"none", border:"none", cursor:"pointer", color:"#2e2e40", padding:2 }}
+                        onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                        onMouseOut={e=>e.currentTarget.style.color="#2e2e40"}>
+                        <Icon name="Trash2" size={14} color="currentColor" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── NOTES ── */}
+            {tab==="notes" && (
+              <div>
+                {editingNote ? (
+                  <NoteEditor note={editingNote} folders={folders} onSave={saveNote} onCancel={()=>setEditingNote(null)} accent={profile.accent} />
+                ) : (
+                  <div style={{ display:"flex", gap:14 }}>
+                    {/* Folder sidebar */}
+                    <div style={{ width:155, flexShrink:0 }}>
+                      <div style={{ fontSize:11, fontFamily:"'DM Mono',monospace", color:"#5a5a78",
+                        textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>Folders</div>
+
+                      <div className="folder-row" onClick={()=>setSelectedFolder(null)}
+                        style={{ display:"flex", alignItems:"center", gap:7, padding:"7px 10px", borderRadius:8,
+                          background:selectedFolder===null?profile.accentDim:"transparent",
+                          color:selectedFolder===null?profile.accent:"#9090b0",
+                          fontSize:13, fontWeight:selectedFolder===null?600:400, marginBottom:2, cursor:"pointer",
+                          border:`1px solid ${selectedFolder===null?profile.accentBorder:"transparent"}` }}>
+                        <Icon name="AlignLeft" size={13} color="currentColor" /> All
+                        <span style={{ marginLeft:"auto", fontSize:11, fontFamily:"'DM Mono',monospace", opacity:0.6 }}>{notes.length}</span>
+                      </div>
+
+                      {folders.map(f => (
+                        <div key={f} className="folder-row" onClick={()=>setSelectedFolder(f)}
+                          style={{ display:"flex", alignItems:"center", gap:7, padding:"7px 10px", borderRadius:8,
+                            background:selectedFolder===f?profile.accentDim:"transparent",
+                            color:selectedFolder===f?profile.accent:"#9090b0",
+                            fontSize:13, fontWeight:selectedFolder===f?600:400, marginBottom:2, cursor:"pointer",
+                            border:`1px solid ${selectedFolder===f?profile.accentBorder:"transparent"}`,
+                            position:"relative" }}>
+                          <Icon name={selectedFolder===f?"FolderOpen":"Folder"} size={13} color="currentColor" />
+                          <span style={{ flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{f}</span>
+                          <span style={{ fontSize:11, fontFamily:"'DM Mono',monospace", opacity:0.6 }}>
+                            {notes.filter(n=>n.folder===f).length}
+                          </span>
+                          <button onClick={e=>{e.stopPropagation();deleteFolder(f);}}
+                            style={{ position:"absolute", right:4, background:"none", border:"none",
+                              cursor:"pointer", color:"transparent", padding:2, fontSize:0 }}
+                            onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                            onMouseOut={e=>e.currentTarget.style.color="transparent"}>
+                            <Icon name="X" size={11} color="currentColor" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {showNewFolder ? (
+                        <div style={{ marginTop:6 }}>
+                          <input className="input-field" placeholder="Folder name…" value={newFolderName}
+                            onChange={e=>setNewFolderName(e.target.value)}
+                            onKeyDown={e=>{if(e.key==="Enter")addFolder();if(e.key==="Escape"){setShowNewFolder(false);setNewFolderName("");}}}
+                            style={{ fontSize:12, padding:"6px 10px", marginBottom:4, "--accent":profile.accent }} autoFocus />
+                          <div style={{ display:"flex", gap:4 }}>
+                            <button onClick={addFolder}
+                              style={{ background:profile.accent, border:"none", color:"white", borderRadius:6,
+                                padding:"4px 10px", cursor:"pointer", fontSize:12, flex:1 }}>Add</button>
+                            <button onClick={()=>{setShowNewFolder(false);setNewFolderName("");}}
+                              style={{ background:"#1a1a22", border:"1px solid #2a2a38", color:"#6b6b8a",
+                                borderRadius:6, padding:"4px 8px", cursor:"pointer" }}>
+                              <Icon name="X" size={11} color="currentColor" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button onClick={()=>setShowNewFolder(true)}
+                          style={{ display:"flex", alignItems:"center", gap:6, background:"none", border:"none",
+                            color:"#5a5a78", cursor:"pointer", fontSize:12, padding:"7px 10px",
+                            marginTop:4, borderRadius:8, width:"100%" }}
+                          onMouseOver={e=>e.currentTarget.style.color=profile.accent}
+                          onMouseOut={e=>e.currentTarget.style.color="#5a5a78"}>
+                          <Icon name="Plus" size={12} color="currentColor" /> New Folder
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Notes list */}
+                    <div style={{ flex:1 }}>
+                      <button onClick={newNote}
+                        style={{ background:profile.accent, border:"none", color:"white", padding:"7px 14px",
+                          borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:500,
+                          display:"flex", alignItems:"center", gap:6, marginBottom:14 }}>
+                        <Icon name="Plus" size={14} color="white" /> New Note
+                      </button>
+
+                      {visibleNotes.length === 0 && (
+                        <div style={{ textAlign:"center", padding:"50px 0", color:"#2e2e40" }}>
+                          <Icon name="FileText" size={28} color="#2e2e40" />
+                          <p style={{ fontSize:13, marginTop:10 }}>
+                            {selectedFolder ? `No notes in "${selectedFolder}".` : `No notes yet for ${profile.label}.`}
+                          </p>
+                        </div>
+                      )}
+
+                      <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
+                        {visibleNotes.map(note => (
+                          <div key={note.id} className="note-card" onClick={()=>setEditingNote(note)}
+                            style={{ padding:"12px 14px", background:"#13131a", borderRadius:10,
+                              border:"1px solid #1c1c28", borderLeft:`3px solid ${profile.accentBorder}`,
+                              display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                            <div style={{ overflow:"hidden", flex:1 }}>
+                              <div style={{ fontSize:14, fontWeight:500, marginBottom:3 }}>{note.title||"Untitled"}</div>
+                              <div style={{ fontSize:11, color:"#3a3a50", fontFamily:"'DM Mono',monospace",
+                                display:"flex", gap:8, alignItems:"center" }}>
+                                <span style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:160 }}>
+                                  {note.body ? note.body.slice(0,45)+(note.body.length>45?"…":"") : "Empty"}
+                                </span>
+                                {note.folder && <span style={{ color:profile.accent, opacity:0.7, flexShrink:0 }}>{note.folder}</span>}
+                                {(note.links?.length>0||note.files?.length>0) && (
+                                  <span style={{ flexShrink:0, display:"flex", alignItems:"center", gap:4 }}>
+                                    {note.links?.length>0 && <><Icon name="Link" size={10} color="currentColor"/>{note.links.length}</>}
+                                    {note.files?.length>0 && <><Icon name="Paperclip" size={10} color="currentColor"/>{note.files.length}</>}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <button onClick={e=>{e.stopPropagation();deleteNote(note.id);}}
+                              style={{ background:"none", border:"none", cursor:"pointer", color:"#2e2e40", padding:4, marginLeft:10, flexShrink:0 }}
+                              onMouseOver={e=>e.currentTarget.style.color="#ef4444"}
+                              onMouseOut={e=>e.currentTarget.style.color="#2e2e40"}>
+                              <Icon name="Trash2" size={13} color="currentColor" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── CALENDAR ── */}
+            {tab==="calendar" && (
+              <div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20 }}>
+                  <button onClick={prevMonth}
+                    style={{ background:"#13131a", border:"1px solid #2a2a38", color:"#e8e6f0", borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                    <Icon name="ChevronLeft" size={16} color="#e8e6f0" />
+                  </button>
+                  <h2 style={{ fontSize:16, fontWeight:600 }}>{MONTHS[calMonth]} {calYear}</h2>
+                  <button onClick={nextMonth}
+                    style={{ background:"#13131a", border:"1px solid #2a2a38", color:"#e8e6f0", borderRadius:8, padding:"6px 10px", cursor:"pointer" }}>
+                    <Icon name="ChevronRight" size={16} color="#e8e6f0" />
+                  </button>
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2, marginBottom:6 }}>
+                  {DAYS.map(d => (
+                    <div key={d} style={{ textAlign:"center", fontSize:11, fontFamily:"'DM Mono',monospace", color:"#3a3a50", padding:"4px 0" }}>{d}</div>
+                  ))}
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:2 }}>
+                  {calGrid.map((day,i) => {
+                    const dayEvents = day ? eventsForDay(day) : [];
+                    return (
+                      <div key={i} className={day?"day-cell":""}
+                        onClick={()=>{ if(day){ setSelectedDay(day); setShowEventModal(true); } }}
+                        style={{ minHeight:58, padding:"6px 5px", borderRadius:8,
+                          background:isToday(day)?profile.accentDim:day?"#13131a":"transparent",
+                          border:isToday(day)?`1px solid ${profile.accentBorder}`:day?"1px solid #1a1a22":"none",
+                          transition:"background 0.15s" }}>
+                        {day && (
+                          <>
+                            <div style={{ fontSize:12, fontWeight:isToday(day)?700:400,
+                              color:isToday(day)?profile.accent:"#909090", textAlign:"right", marginBottom:3 }}>{day}</div>
+                            <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                              {dayEvents.slice(0,2).map(ev => (
+                                <div key={ev.id} style={{ fontSize:10, background:profile.accentDim, color:profile.accent,
+                                  borderRadius:3, padding:"1px 4px", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                  {ev.text}
+                                </div>
+                              ))}
+                              {dayEvents.length>2 && <div style={{ fontSize:10, color:"#3a3a50" }}>+{dayEvents.length-2}</div>}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* All events list */}
+                <div style={{ marginTop:30 }}>
+                  <div style={{ fontSize:11, fontFamily:"'DM Mono',monospace", color:"#5a5a78",
+                    textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>All Events</div>
+
+                  {calEvents.length === 0 && (
+                    <div style={{ textAlign:"center", padding:"30px 0", color:"#2e2e40" }}>
+                      <Icon name="Calendar" size={26} color="#2e2e40" />
+                      <p style={{ fontSize:13, marginTop:8 }}>No events yet. Click any day to add one.</p>
+                    </div>
+                  )}
+
+                  {upcomingEvents.length > 0 && (
+                    <div style={{ marginBottom:20 }}>
+                      <div style={{ fontSize:11, color:profile.accent, fontFamily:"'DM Mono',monospace", marginBottom:8, opacity:0.8 }}>Upcoming</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                        {upcomingEvents.map(ev => <EventListItem key={ev.id} ev={ev} />)}
+                      </div>
+                    </div>
+                  )}
+
+                  {pastEvents.length > 0 && (
+                    <div>
+                      <div style={{ fontSize:11, color:"#5a5a78", fontFamily:"'DM Mono',monospace", marginBottom:8 }}>Past</div>
+                      <div style={{ display:"flex", flexDirection:"column", gap:6, opacity:0.5 }}>
+                        {[...pastEvents].reverse().map(ev => <EventListItem key={ev.id} ev={ev} />)}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {showEventModal && selectedDay && (
+            <EventModal
+              day={selectedDay} month={calMonth} year={calYear}
+              events={eventsForDay(selectedDay)}
+              onAdd={addCalEvent} onDelete={deleteCalEvent}
+              onClose={()=>setShowEventModal(false)}
+              accent={profile.accent} />
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
