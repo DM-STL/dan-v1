@@ -323,7 +323,23 @@ textarea.input{resize:vertical;min-height:72px;line-height:1.5}
 
       <div class="field">
         <div class="field-label">Title / Topic <span style="color:#ef4444">*</span></div>
-        <input type="text" class="input" id="sopTitle" placeholder="e.g. Employee Onboarding Process">
+        <input type="text" class="input" id="sopTitle" placeholder="e.g. New Club Construction — Award of Project">
+      </div>
+
+      <div class="field">
+        <div class="field-label">Organization / Company</div>
+        <input type="text" class="input" id="sopOrg" placeholder="e.g. Equinox Holdings" oninput="saveOrg()">
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field">
+          <div class="field-label">Effective Date</div>
+          <input type="date" class="input" id="sopEffective">
+        </div>
+        <div class="field">
+          <div class="field-label">Revision Date</div>
+          <input type="date" class="input" id="sopRevision">
+        </div>
       </div>
 
       <div class="field">
@@ -332,18 +348,18 @@ textarea.input{resize:vertical;min-height:72px;line-height:1.5}
       </div>
 
       <div class="field">
-        <div class="field-label">Target Audience</div>
-        <input type="text" class="input" id="sopAudience" placeholder="e.g. HR team, new hires, IT staff">
+        <div class="field-label">Target Audience / Stakeholders</div>
+        <input type="text" class="input" id="sopAudience" placeholder="e.g. PM, APM, GC, Finance, Design">
       </div>
 
       <div class="field">
         <div class="field-label">Scope</div>
-        <textarea class="input" id="sopScope" rows="2" placeholder="What is included / excluded from this SOP…"></textarea>
+        <textarea class="input" id="sopScope" rows="2" placeholder="What is included / excluded…"></textarea>
       </div>
 
       <div class="field">
         <div class="field-label">Prerequisites / Requirements</div>
-        <textarea class="input" id="sopPrereqs" rows="2" placeholder="Tools, access, knowledge needed before starting…"></textarea>
+        <textarea class="input" id="sopPrereqs" rows="2" placeholder="Tools, access, software (e.g. Procore), knowledge needed…"></textarea>
       </div>
 
       <div class="field">
@@ -355,16 +371,25 @@ textarea.input{resize:vertical;min-height:72px;line-height:1.5}
       </div>
 
       <div class="field">
+        <div class="field-label">Approval / Sign-Off Roles</div>
+        <div class="tags-wrap" id="rolesWrap" onclick="focusRoleInput()" title="Press Enter or comma to add a role">
+          <input type="text" class="tags-input" id="rolesInput" placeholder="Add role, press Enter…" onkeydown="handleRoleKey(event)" oninput="checkRoleInput(event)">
+        </div>
+        <div class="char-hint">e.g. SVP Construction, CDO, CFO, Managing Partner</div>
+      </div>
+
+      <div class="field">
         <div class="field-label">Additional Notes</div>
-        <textarea class="input" id="sopNotes" rows="2" placeholder="Special considerations, warnings, references…"></textarea>
+        <textarea class="input" id="sopNotes" rows="2" placeholder="Warnings, references, vendor contacts, approval thresholds…"></textarea>
       </div>
 
       <div class="field">
         <div class="field-label">Output Format</div>
         <select class="input" id="sopFormat">
-          <option value="detailed">Detailed with numbered steps</option>
+          <option value="playbook">Playbook style (approval matrices, sign-offs, exhibits)</option>
+          <option value="detailed">Detailed — numbered steps with sub-steps</option>
           <option value="concise">Concise — bullet points</option>
-          <option value="table">Table format (step / action / owner)</option>
+          <option value="table">Table format (step / action / owner / notes)</option>
           <option value="flowchart">Prose flowchart narrative</option>
         </select>
       </div>
@@ -413,6 +438,7 @@ textarea.input{resize:vertical;min-height:72px;line-height:1.5}
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
 let steps = [];
+let roles = [];
 let rawMarkdown = '';
 let streaming = false;
 let abortCtrl = null;
@@ -427,7 +453,19 @@ const sv = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch
   const model = ld('sop_model', 'claude-haiku-4-5-20251001');
   if (apiKey) document.getElementById('apiKeyInput').value = apiKey;
   document.getElementById('modelSelect').value = model;
+
+  const org = ld('sop_org', '');
+  if (org) document.getElementById('sopOrg').value = org;
+
+  // Default dates to today
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('sopEffective').value = today;
+  document.getElementById('sopRevision').value = today;
 })();
+
+function saveOrg() {
+  sv('sop_org', document.getElementById('sopOrg').value.trim());
+}
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function toggleSettings() {
@@ -477,12 +515,52 @@ function removeStep(i) {
 function renderSteps() {
   const wrap = document.getElementById('stepsWrap');
   const input = document.getElementById('stepsInput');
-  // Remove existing tags
   wrap.querySelectorAll('.tag').forEach(t => t.remove());
   steps.forEach((s, i) => {
     const tag = document.createElement('span');
     tag.className = 'tag';
     tag.innerHTML = `${s}<button class="tag-rm" onclick="removeStep(${i})" title="Remove">×</button>`;
+    wrap.insertBefore(tag, input);
+  });
+}
+
+// ── Roles / sign-off tags ─────────────────────────────────────────────────────
+function focusRoleInput() { document.getElementById('rolesInput').focus(); }
+
+function handleRoleKey(e) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addRole(e.target.value.trim().replace(/,$/, ''));
+    e.target.value = '';
+  } else if (e.key === 'Backspace' && e.target.value === '' && roles.length) {
+    removeRole(roles.length - 1);
+  }
+}
+
+function checkRoleInput(e) {
+  const v = e.target.value;
+  if (v.endsWith(',')) { addRole(v.slice(0, -1).trim()); e.target.value = ''; }
+}
+
+function addRole(text) {
+  if (!text) return;
+  roles.push(text);
+  renderRoles();
+}
+
+function removeRole(i) {
+  roles.splice(i, 1);
+  renderRoles();
+}
+
+function renderRoles() {
+  const wrap = document.getElementById('rolesWrap');
+  const input = document.getElementById('rolesInput');
+  wrap.querySelectorAll('.tag').forEach(t => t.remove());
+  roles.forEach((r, i) => {
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.innerHTML = `${r}<button class="tag-rm" onclick="removeRole(${i})" title="Remove">×</button>`;
     wrap.insertBefore(tag, input);
   });
 }
@@ -544,6 +622,9 @@ async function generateSOP() {
   }
 
   const model = document.getElementById('modelSelect').value || ld('sop_model', 'claude-haiku-4-5-20251001');
+  const org = document.getElementById('sopOrg').value.trim();
+  const effective = document.getElementById('sopEffective').value;
+  const revision = document.getElementById('sopRevision').value;
   const desc = document.getElementById('sopDesc').value.trim();
   const audience = document.getElementById('sopAudience').value.trim();
   const scope = document.getElementById('sopScope').value.trim();
@@ -552,36 +633,51 @@ async function generateSOP() {
   const format = document.getElementById('sopFormat').value;
 
   const formatDescriptions = {
-    detailed: 'Use a detailed structure with clearly numbered steps (e.g. 1.1, 1.2), sub-steps, and explanatory paragraphs.',
+    playbook: `Use a professional construction project management playbook style. Structure with numbered sections (e.g. 1.0, 2.0, 2.1). Include:
+- A header block with EFFECTIVE DATE and REVISION DATE
+- Definitions table with DEFINITION and SIGN OFF columns listing who approves each item
+- Numbered step procedures with explicit STAKEHOLDER callouts per step (e.g. "Stakeholder: PM, Finance, CDO")
+- An approval authority matrix table showing Level 1 / Level 2 thresholds and required signatories
+- A DEFINITIONS section with clear terms
+- Checklists with CONFIRMATION columns where appropriate
+- Reference to Exhibits (Exhibit A, B, C…) for any sample documents or templates mentioned
+- A REVISION HISTORY table at the end with placeholder rows
+- Sign-off blocks listing role names`,
+    detailed: 'Use a detailed structure with clearly numbered steps (e.g. 1.1, 1.2), sub-steps, and explanatory paragraphs under each.',
     concise: 'Use a concise format with bullet points. Keep each point brief and action-oriented.',
-    table: 'Format each major section as a table with columns: Step # | Action | Responsible Party | Notes.',
-    flowchart: 'Write as a prose flowchart narrative — describe how the process flows, including decision points and branching paths.',
+    table: 'Format each major section as a markdown table with columns: Step # | Action | Responsible Party | Notes. Add a separate sign-off table at the end.',
+    flowchart: 'Write as a prose flowchart narrative — describe how the process flows, including decision points and branching paths in plain language.',
   };
 
-  const prompt = `Write a professional Standard Operating Procedure (SOP) document for the following:
+  // Reference system prompt drawn from Equinox PM Playbook structure
+  const systemPrompt = `You are an expert technical writer specializing in construction and project management SOPs. You have deep familiarity with the Equinox Project Management Playbook format (2024), which uses: numbered section hierarchies (1.0, 2.0, 2.1), explicit STAKEHOLDER callouts per procedure step, approval authority matrices with dollar thresholds and signatory levels, DEFINITION tables paired with SIGN OFF columns, checklists with CONFIRMATION columns, Exhibit references (A, B, C…) for sample documents, and header blocks with EFFECTIVE DATE / REVISION DATE. Key domain vocabulary: LOI (Letter of Intent), TI (Tenant Improvement), GC (General Contractor), MEP (Mechanical/Electrical/Plumbing), APM (Assistant Project Manager), RFI (Request for Information), ASI (Architect's Supplemental Instructions), AHJ (Authorities Having Jurisdiction), Procore (project management software), BAB (Budget at Bid), IFC (Issued for Construction). Always produce documents that are immediately usable, professionally formatted in Markdown, with concrete stakeholder accountability at every step.`;
 
-**Title:** ${title}
+  const prompt = `Write a professional Standard Operating Procedure document for the following:
+
+**Title:** ${title}${org ? `\n**Organization:** ${org}` : ''}${effective ? `\n**Effective Date:** ${effective}` : ''}${revision ? `\n**Revision Date:** ${revision}` : ''}
 ${desc ? `**Description:** ${desc}` : ''}
-${audience ? `**Target Audience:** ${audience}` : ''}
+${audience ? `**Target Audience / Stakeholders:** ${audience}` : ''}
 ${scope ? `**Scope:** ${scope}` : ''}
 ${prereqs ? `**Prerequisites / Requirements:** ${prereqs}` : ''}
 ${steps.length ? `**Key Steps / Phases:** ${steps.map((s, i) => `${i + 1}. ${s}`).join('; ')}` : ''}
+${roles.length ? `**Approval / Sign-Off Roles:** ${roles.join(', ')}` : ''}
 ${notes ? `**Additional Notes:** ${notes}` : ''}
 
 **Format instructions:** ${formatDescriptions[format]}
 
-Structure the SOP with these sections (adapt as needed):
+Standard section structure to include (adapt as needed for format):
 1. Purpose
 2. Scope
-3. Definitions / Terms (if relevant)
-4. Responsibilities
-5. Prerequisites / Required Materials
-6. Procedure (the main step-by-step content)
-7. Quality / Verification Checks
-8. References / Related Documents (if relevant)
-9. Revision History (placeholder row)
+3. Definitions / Terms (with sign-off authority where applicable)
+4. Responsibilities (by role)
+5. Prerequisites / Required Materials / Tools
+6. Procedure (numbered steps with stakeholder callouts)
+7. Approval Authority Matrix (if roles were provided)
+8. Quality Checks / Verification
+9. References / Related Documents
+10. Revision History (placeholder table)
 
-Use Markdown formatting throughout. Make it professional, clear, and immediately usable.`;
+Use Markdown throughout. Be specific, actionable, and immediately usable.`;
 
   // UI: start streaming state
   setStreaming(true);
@@ -599,8 +695,9 @@ Use Markdown formatting throughout. Make it professional, clear, and immediately
 
   const body = {
     model,
-    max_tokens: 4096,
+    max_tokens: 6000,
     stream: true,
+    system: systemPrompt,
     messages: [{ role: 'user', content: prompt }],
   };
   if (useThinking) body.thinking = { type: 'adaptive' };
